@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0E1113" />
+    <meta name="color-scheme" content="dark" />
+
+    <!-- Primary branding (tab title + search name) -->
+    <title>MineBD — Community hub for Bangladeshi Minecraft players</title>
+    <meta name="application-name" content="MineBD" />
+    <meta name="apple-mobile-web-app-title" content="MineBD" />
+    <meta name="author" content="PixelHive" />
+    <meta
+      name="description"
+      content="MineBD is a free community portal for Bangladeshi Minecraft players: find Java and Bedrock servers, join events, report cheaters, browse plugins/mods/textures, hire developers, and follow content creators."
+    />
+    <meta name="keywords" content="MineBD, Minecraft Bangladesh, BD Minecraft, Java servers, Bedrock servers, Minecraft community" />
+    <link rel="canonical" href="https://minebd.pages.dev/" />
+
+    <!-- Favicons (must live in /public so Cloudflare Pages serves them at the site root) -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <!-- Open Graph — Google / Facebook / Discord use these for site name + preview -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="MineBD" />
+    <meta property="og:title" content="MineBD — Community hub for Bangladeshi Minecraft players" />
+    <meta
+      property="og:description"
+      content="Free portal for Bangladeshi Minecraft players: servers, events, reports, marketplace, hire developers, creators, and Best Player leaderboard."
+    />
+    <meta property="og:url" content="https://minebd.pages.dev/" />
+    <meta property="og:image" content="https://minebd.pages.dev/og-image.png" />
+    <meta property="og:image:width" content="512" />
+    <meta property="og:image:height" content="512" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter / X cards -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="MineBD — Community hub for Bangladeshi Minecraft players" />
+    <meta
+      name="twitter:description"
+      content="Free portal for Bangladeshi Minecraft players: servers, events, reports, marketplace, hire developers, and creators."
+    />
+    <meta name="twitter:image" content="https://minebd.pages.dev/og-image.png" />
+
+    <!-- Optional: HTML-tag verification (preferred if file method fails).
+         In Search Console choose HTML tag, paste token below, deploy, Verify. -->
+    <!-- <meta name="google-site-verification" content="YOUR_TOKEN_FROM_SEARCH_CONSOLE" /> -->
+    <!-- Domain ownership: public/google08bec25b7dda3f48.html (Search Console HTML file method) -->
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=Noto+Sans+Bengali:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      html, body, #root { height: 100%; background: #0E1113; }
+      body { margin: 0; -webkit-tap-highlight-color: transparent; overflow-x: hidden; color: #E7EAEC; font-family: Inter, system-ui, sans-serif; }
+      .seo-fallback { max-width: 40rem; margin: 2rem auto; padding: 1rem; }
+      .seo-fallback h1 { font-size: 1.5rem; margin: 0 0 0.5rem; }
+      .seo-fallback p { color: #8F979D; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <!-- Visible to crawlers / before React loads; helps Google branding review -->
+      <div class="seo-fallback">
+        <h1>MineBD</h1>
+        <p>
+          Welcome to MineBD — a free community hub for Bangladeshi Minecraft players.
+          Browse Java and Bedrock servers, join community events, report rule-breakers,
+          download plugins, mods, textures and worlds, hire developers, follow content
+          creators, and climb the Best Player leaderboard. Made by PixelHive.
+          Support: info.minebd@proton.me
+        </p>
+      </div>
+    </div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

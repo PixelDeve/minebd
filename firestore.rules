@@ -1,0 +1,323 @@
+// =============================================================================
+// IMPORTANT — this file only takes effect once you deploy it:
+//
+//     firebase deploy --only firestore:rules
+//
+// Editing this file locally (or even having it in your project folder)
+// does NOT change what's enforced on your live Firestore database.
+// =============================================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+    function isSignedIn() { return request.auth != null; }
+    function myUid() { return request.auth.uid; }
+    function isOwnerOf(resource) { return isSignedIn() && myUid() == resource.data.ownerId; }
+
+    // Only these fields changed compared to what's already stored.
+    function onlyChanged(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    // Role lives in Firestore at users/{uid}.role — no Cloud Function or
+    // custom claim required. A user can never grant themselves admin/owner
+    // because the users/{uid} rules below only let an *existing*
+    // admin/owner change someone else's role/banned/verified fields.
+    function myProfile() { return get(/databases/$(database)/documents/users/$(myUid())).data; }
+    function haveProfile() { return isSignedIn() && exists(/databases/$(database)/documents/users/$(myUid())); }
+    function myRole() { return haveProfile() ? myProfile().role : null; }
+    function isAdmin() { return myRole() == 'admin' || myRole() == 'owner'; }
+    function isOwnerRole() { return myRole() == 'owner'; }
+    function amBanned() { return haveProfile() && myProfile().banned == true; }
+
+    // Basic spam brake: rejects a new post if the account's last one (of
+    // any kind — server/event/report/resource/developer/player/comment)
+    // landed less than `seconds` ago. Not bulletproof against a determined
+    // attacker rotating accounts, but it stops button-mashing and simple
+    // scripts, which is what "spam" usually means in practice here.
+    function cooldownOk(seconds) {
+      return !haveProfile()
+        || !('lastPostAt' in myProfile())
+        || request.time > myProfile().lastPostAt + duration.value(seconds, 's');
+    }
+
+    // ---------- users (profiles + roles) ----------
+    match /users/{userId} {
+      allow read: if true;
+      // First sign-in: a user may create their own doc, but only as a
+      // fresh, unprivileged member — never as admin/owner/verified/banned.
+      allow create: if isSignedIn() && myUid() == userId
+                    && request.resource.data.role == 'member'
+                    && request.resource.data.banned == false
+                    && request.resource.data.verified == false;
+      // A user may rename themselves and update their own spam-cooldown
+      // bookkeeping (lastPostAt/postCount, written right after they post
+      // something), but can't touch their own role/ban/verified status.
+      // Admins/owner can change anyone's.
+      allow update: if (isSignedIn() && myUid() == userId && onlyChanged(['name', 'lastPostAt', 'postCount']))
+                    || isAdmin();
+      // A user may delete their own profile doc (account deletion); an
+      // admin/owner can also remove one (e.g. cleaning up a banned account).
+      allow delete: if (isSignedIn() && myUid() == userId) || isAdmin();
+
+      // In-app notifications. Anyone signed in (not banned) can create a
+      // notification *for* another user — that's how "new event on a
+      // server you follow" gets delivered — but only the recipient can
+      // read, mark-read, or delete their own notifications.
+      match /notifications/{notifId} {
+        allow create: if isSignedIn() && !amBanned();
+        allow read, update, delete: if isSignedIn() && myUid() == userId;
+      }
+    }
+
+    // ---------- servers ----------
+    match /servers/{serverId} {
+      allow read: if true;
+      allow create: if isSignedIn() && !amBanned() && cooldownOk(10)
+                    && request.resource.data.ownerId == myUid()
+                    && request.resource.data.name is string
+                    // At least one connect address: legacy `ip` or split java/bedrock.
+                    && (
+                      (request.resource.data.ip is string && request.resource.data.ip.size() > 0)
+                      || (request.resource.data.javaIp is string && request.resource.data.javaIp.size() > 0)
+                      || (request.resource.data.bedrockIp is string && request.resource.data.bedrockIp.size() > 0)
+                    );
+      // Owner/admin can edit anything. Anyone signed in (and not banned)
+      // can update ONLY rating+votes or ONLY followers — that's what lets
+      // the aggregate review score and follow count be written without
+      // giving them edit rights over the listing itself. Live status
+      // (online/players/cap/lastSeen) is intentionally open to EVERYONE,
+      // signed in or not: it only ever comes from a real mcstatus.io
+      // ping done in the visitor's own browser, viewing never required
+      // login in the first place, and a wrong value just gets corrected
+      // by the next ping — restricting it to signed-in owners only would
+      // mean status/uptime never updates unless the owner happens to
+      // revisit the site.
+      // Live status is still open to everyone (see note above), but the
+      // *values* are now sanity-checked so a stray/malicious direct write
+      // can't set implausible numbers (e.g. 50 million online players) that
+      // would otherwise show up in listings and skew stats.
+      allow update: if isOwnerOf(resource) || isAdmin()
+                    || (isSignedIn() && !amBanned() && (onlyChanged(['rating', 'votes']) || onlyChanged(['followers'])))
+                    || (onlyChanged(['online', 'players', 'cap', 'lastSeen'])
+                        && request.resource.data.online is bool
+                        && request.resource.data.players is int && request.resource.data.players >= 0 && request.resource.data.players <= 100000
+                        && request.resource.data.cap is int && request.resource.data.cap >= 0 && request.resource.data.cap <= 100000
+                        && request.resource.data.lastSeen is int);
+      allow delete: if isOwnerOf(resource) || isAdmin();
+
+      // One review per account: the document ID *is* the reviewer's uid,
+      // so writing again just edits their own existing review.
+      match /reviews/{reviewerId} {
+        allow read: if true;
+        allow create, update: if isSignedIn() && !amBanned() && reviewerId == myUid()
+                      && request.resource.data.uid == myUid()
+                      && request.resource.data.stars is int
+                      && request.resource.data.stars >= 1
+                      && request.resource.data.stars <= 5;
+        allow delete: if reviewerId == myUid() || isAdmin();
+      }
+
+      // Comment thread — unlike reviews, a person can post more than one
+      // comment, so this uses auto-generated IDs instead of uid-as-ID.
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if isSignedIn() && !amBanned() && cooldownOk(5)
+                      && request.resource.data.uid == myUid()
+                      && request.resource.data.text is string
+                      && request.resource.data.text.size() > 0
+                      && request.resource.data.text.size() <= 500;
+        allow delete: if (isSignedIn() && resource.data.uid == myUid()) || isAdmin();
+      }
+
+      // Bookmark/follow a server — doc ID is the follower's uid, so it's
+      // naturally one follow per account, toggled by create/delete.
+      match /followers/{followerId} {
+        allow read: if true;
+        allow create: if isSignedIn() && !amBanned() && followerId == myUid();
+        allow delete: if followerId == myUid();
+      }
+
+      // One doc per calendar day, holding that day's ping result — same
+      // open trust model as online/players/lastSeen above, since it's
+      // the exact same client-side ping being recorded.
+      match /uptimeLog/{dateKey} {
+        allow read: if true;
+        allow write: if true;
+      }
+    }
+
+    // ---------- events ----------
+    match /events/{eventId} {
+      allow read: if true;
+      allow create: if isSignedIn() && !amBanned() && cooldownOk(10)
+                    && request.resource.data.ownerId == myUid()
+                    && request.resource.data.durationHours <= 48;
+      allow update: if isOwnerOf(resource) || isAdmin()
+                    || (isSignedIn() && !amBanned() && onlyChanged(['rsvpCount']));
+      allow delete: if isOwnerOf(resource) || isAdmin();
+
+      // RSVP ("I'm interested") — one per account, doc ID is the uid.
+      match /rsvps/{rsvpId} {
+        allow read: if true;
+        allow create: if isSignedIn() && !amBanned() && rsvpId == myUid();
+        allow delete: if rsvpId == myUid();
+      }
+    }
+
+    // ---------- reports ----------
+    match /reports/{reportId} {
+      allow read: if true;
+      allow create: if isSignedIn() && !amBanned() && cooldownOk(10)
+                    && request.resource.data.ownerId == myUid();
+      // Owner/admin can edit the listing. Anyone signed in can update ONLY
+      // the vote/flag aggregates recomputed from subcollections.
+      allow update: if isOwnerOf(resource) || isAdmin()
+                    || (isSignedIn() && !amBanned() && (onlyChanged(['up', 'down']) || onlyChanged(['flagged'])));
+      allow delete: if isOwnerOf(resource) || isAdmin();
+
+      // One vote per account: document ID is the voter's uid. Deleting
+      // this doc (clicking the same direction again) is how an "un-vote"
+      // happens — see toggleReportVote in src/lib/social.js.
+      match /votes/{voterId} {
+        allow read: if true;
+        allow create, update: if isSignedIn() && !amBanned() && voterId == myUid()
+                      && request.resource.data.dir in ['up', 'down'];
+        allow delete: if voterId == myUid();
+      }
+
+      // "Report as false" flags — one per account, doc ID is the flagger's
+      // uid, same public-read pattern as votes/likes/followers elsewhere
+      // (a collection-wide read is needed to recompute the aggregate count,
+      // which Firestore only allows when every doc in it is readable).
+      match /flags/{flaggerId} {
+        allow read: if true;
+        allow create: if isSignedIn() && !amBanned() && flaggerId == myUid();
+        allow delete: if flaggerId == myUid();
+      }
+    }
+
+    // ---------- resources (plugins / mods / textures / worlds) ----------
+    match /resources/{resourceId} {
+      allow read: if true;
+      allow create: if isSignedIn() && !amBanned() && cooldownOk(10)
+                    && request.resource.data.ownerId == myUid();
+      allow update: if isOwnerOf(resource) || isAdmin()
+                    || (isSignedIn() && !amBanned() && onlyChanged(['rating', 'votes']));
+      allow delete: if isOwnerOf(resource) || isAdmin();
+
+      // One review per account, same doc-ID-is-uid pattern as servers.
+      match /reviews/{reviewerId} {
+        allow read: if true;
+        allow create, update: if isSignedIn() && !amBanned() && reviewerId == myUid()
+                      && request.resource.data.uid == myUid()
+                      && request.resource.data.stars is int
+                      && request.resource.data.stars >= 1
+                      && request.resource.data.stars <= 5;
+        allow delete: if reviewerId == myUid() || isAdmin();
+      }
+    }
+
+    // ---------- developers (hire-a-developer listings) ----------
+    match /developers/{devId} {
+      allow read: if true;
+      allow create: if isSignedIn() && !amBanned() && cooldownOk(10)
+                    && request.resource.data.ownerId == myUid();
+      // Owner can edit their listing but not their own verified/rating/votes.
+      // Admin can edit anything. Anyone signed in (not banned) can update
+      // ONLY rating+votes, or ONLY followers.
+      allow update: if isAdmin()
+                    || (isOwnerOf(resource) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['verified', 'rating', 'votes']))
+                    || (isSignedIn() && !amBanned() && (onlyChanged(['rating', 'votes']) || onlyChanged(['followers'])));
+      allow delete: if isOwnerOf(resource) || isAdmin();
+
+      match /ratings/{raterId} {
+        allow read: if true;
+        allow create, update: if isSignedIn() && !amBanned() && raterId == myUid()
+                      && request.resource.data.uid == myUid()
+                      && request.resource.data.stars is int
+                      && request.resource.data.stars >= 1
+                      && request.resource.data.stars <= 5;
+        allow delete: if raterId == myUid() || isAdmin();
+      }
+
+      match /followers/{followerId} {
+        allow read: if true;
+        allow create: if isSignedIn() && !amBanned() && followerId == myUid();
+        allow delete: if followerId == myUid();
+      }
+    }
+
+    // ---------- players (Best Player leaderboard) ----------
+    match /players/{playerId} {
+      allow read: if true;
+      allow create: if isSignedIn() && !amBanned() && cooldownOk(10)
+                    && request.resource.data.ownerId == myUid()
+                    && request.resource.data.name is string;
+      allow update: if isOwnerOf(resource) || isAdmin()
+                    || (isSignedIn() && !amBanned() && onlyChanged(['likes']));
+      allow delete: if isOwnerOf(resource) || isAdmin();
+
+      match /likes/{likerId} {
+        allow read: if true;
+        allow create: if isSignedIn() && !amBanned() && likerId == myUid();
+        allow delete: if likerId == myUid();
+      }
+    }
+
+    // ---------- verification requests ----------
+    match /verificationRequests/{reqId} {
+      allow create: if isSignedIn() && !amBanned() && request.resource.data.uid == myUid();
+      allow read, update: if isAdmin();
+    }
+
+    // ---------- ads (owner-only write; anyone can read; impressions open to signed-in) ----------
+    match /ads/{adId} {
+      allow read: if true;
+      allow create, update, delete: if isOwnerRole();
+      // Impression docs: one write per viewer when an ad is shown on a list or profile.
+      match /impressions/{impId} {
+        allow read: if isOwnerRole() || isAdmin();
+        allow create: if isSignedIn() && !amBanned();
+      }
+    }
+
+    // ---------- content creator posts (YouTube / Facebook / Instagram / Twitch links) ----------
+    match /content/{postId} {
+      allow read: if true;
+      allow create: if isSignedIn() && !amBanned() && cooldownOk(10)
+                    && request.resource.data.ownerId == myUid()
+                    && request.resource.data.link is string
+                    && request.resource.data.platform is string;
+      // followers = follow toggles; views = public view counter (anyone can
+      // bump, no login required) — but each write may only increment it by
+      // exactly 1, so a direct/scripted write can't inflate view counts
+      // (which feed the monetization payout estimate) with one big jump.
+      allow update: if isOwnerOf(resource) || isAdmin()
+                    || (isSignedIn() && !amBanned() && onlyChanged(['followers']))
+                    || (onlyChanged(['views'])
+                        && request.resource.data.views is int
+                        && request.resource.data.views == resource.data.get('views', 0) + 1);
+      allow delete: if isOwnerOf(resource) || isAdmin();
+
+      match /followers/{followerId} {
+        allow read: if true;
+        allow create: if isSignedIn() && !amBanned() && followerId == myUid();
+        allow delete: if followerId == myUid();
+      }
+    }
+
+    // ---------- analytics: unique daily active users, for the admin dashboard ----------
+    match /analytics/{dateKey} {
+      allow read: if isAdmin();
+      match /activeUsers/{uid} {
+        allow read: if isAdmin();
+        // A signed-in visit writes exactly one doc, keyed by their own uid,
+        // for today — naturally deduplicated to one per person per day.
+        allow create: if isSignedIn() && uid == myUid();
+      }
+    }
+  }
+}

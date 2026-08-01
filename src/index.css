@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  font-size: 15px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: #0e1113;
+  color: #e7eaec;
+}
+
+/* Prevent horizontal scroll from wide cards/inputs on small phones */
+#root {
+  overflow-x: hidden;
+  width: 100%;
+}
+
+img {
+  max-width: 100%;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2f33;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

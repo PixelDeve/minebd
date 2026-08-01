@@ -1,0 +1,8 @@
+# Google Search Console file is a real static asset in /public — CF serves it as-is.
+
+# Optional proxy (unused while authDomain is m1nebd.firebaseapp.com)
+/__/auth/*  https://m1nebd.firebaseapp.com/__/auth/:splat  200
+/__/firebase/*  https://m1nebd.firebaseapp.com/__/firebase/:splat  200
+
+# SPA fallback for client-side routes
+/*    /index.html   200
