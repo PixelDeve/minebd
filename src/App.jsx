@@ -202,7 +202,8 @@ const LANG = {
     no_results: "Nothing here yet.", uploading: "Uploading…", rating: "Rating",
     nav_players: "Best Player", add_player: "Nominate player",
     player_name: "Player name / IGN", player_desc: "Why they're the best (optional)",
-    player_server: "Server (optional)", none_option: "— None —",
+    player_server: "Server (optional)", player_discord: "Discord (optional)",
+    none_option: "— None —", player_details: "Player details",
     likes: "likes", like: "Like",
     follow: "Follow", following: "Following", followers: "followers",
     comments: "Comments", write_comment: "Write a comment…", post: "Post",
@@ -286,7 +287,8 @@ const LANG = {
     no_results: "এখানে এখনো কিছু নেই।", uploading: "আপলোড হচ্ছে…", rating: "রেটিং",
     nav_players: "সেরা খেলোয়াড়", add_player: "খেলোয়াড় মনোনয়ন করুন",
     player_name: "খেলোয়াড়ের নাম / আইজিএন", player_desc: "কেন সেরা (ঐচ্ছিক)",
-    player_server: "সার্ভার (ঐচ্ছিক)", none_option: "— কোনোটি না —",
+    player_server: "সার্ভার (ঐচ্ছিক)", player_discord: "ডিসকর্ড (ঐচ্ছিক)",
+    none_option: "— কোনোটি না —", player_details: "খেলোয়াড়ের বিবরণ",
     likes: "লাইক", like: "লাইক",
     follow: "ফলো", following: "ফলো করছেন", followers: "ফলোয়ার",
     comments: "মন্তব্য", write_comment: "মন্তব্য লিখুন…", post: "পোস্ট",
@@ -1754,7 +1756,7 @@ function DevsSection({ t, session, coll, ads, openId, onConsumeOpenId }) {
 const RANK_COLOR = { 1: "#F0B94D", 2: "#C9CFD6", 3: "#CC8A4C" };
 
 function PlayerFormModal({ t, servers, initial, onClose, onSave }) {
-  const [f, setF] = useState(initial || { name: "", platform: "Java", desc: "", serverId: "", photo: null });
+  const [f, setF] = useState(initial || { name: "", platform: "Java", desc: "", discord: "", serverId: "", photo: null });
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
   return (
     <Modal title={initial ? `${t("edit")} — ${t("nav_players")}` : t("add_player")} onClose={onClose}>
@@ -1770,9 +1772,88 @@ function PlayerFormModal({ t, servers, initial, onClose, onSave }) {
           {servers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
       </Field>
+      <Field label={t("player_discord")}>
+        <input className={inputCls} style={inputStyle} placeholder="username or discord.gg/…" value={f.discord || ""} onChange={(e) => set("discord", e.target.value)} />
+      </Field>
       <Field label={t("player_desc")}><textarea rows={3} className={inputCls} style={inputStyle} value={f.desc} onChange={(e) => set("desc", e.target.value)} /></Field>
       <Field label={t("profile_pic")}><ImagePicker value={f.photo} onChange={(v) => set("photo", v)} /></Field>
       <SaveButton canSave={!!f.name} onSave={() => onSave(f)}>{t("save")}</SaveButton>
+    </Modal>
+  );
+}
+
+function PlayerDetailModal({ p, rank, t, session, servers, canManage, onClose, onEdit, onDelete }) {
+  const [liked, setLiked] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const server = servers.find((s) => s.id === p.serverId);
+
+  useEffect(() => {
+    if (!session.uid) { setLiked(false); return; }
+    getMyPlayerLike(p.id, session.uid).then(setLiked).catch(() => {});
+  }, [p.id, session.uid]);
+
+  const toggle = () => guardPost(session, async () => {
+    setBusy(true);
+    try { setLiked(await togglePlayerLike(p.id, session.uid)); }
+    catch (err) {
+      console.error(err);
+      alert("Couldn't save your like — " + (err?.message || "please try again."));
+    } finally { setBusy(false); }
+  });
+
+  const share = () => { copyShareLink("players", p.id); alert(t("link_copied")); };
+  const handleClose = () => { resetShareUrl(); onClose(); };
+  const discord = (p.discord || "").trim();
+  const discordIsLink = /^https?:\/\//i.test(discord) || /^discord\.gg\//i.test(discord);
+  const discordHref = discordIsLink
+    ? (discord.startsWith("http") ? discord : `https://${discord}`)
+    : null;
+
+  return (
+    <Modal title={t("player_details")} onClose={handleClose}>
+      <div className="flex flex-col items-center text-center mb-4">
+        <div className="w-20 h-20 rounded-full overflow-hidden flex items-center justify-center mb-3"
+          style={{ background: C.panel2, border: rank && rank <= 3 ? `3px solid ${RANK_COLOR[rank]}` : `2px solid ${C.border}` }}>
+          {p.photo ? <img src={p.photo} className="w-full h-full object-cover" alt="" /> : <User size={32} color={C.muted} />}
+        </div>
+        <p className="font-semibold text-lg flex items-center gap-1.5">
+          {rank ? <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: rank <= 3 ? RANK_COLOR[rank] : C.panel2, color: rank <= 3 ? "#181205" : C.muted }}>#{rank}</span> : null}
+          {p.name}
+        </p>
+        <p className="text-xs mt-1" style={{ color: C.muted }}>
+          {p.platform}{server ? ` · ${server.name}` : ""}
+        </p>
+        <ListingBadges t={t} createdAt={p.createdAt} rating={5} votes={p.likes} trendMinVotes={10} trendMinRating={0} />
+        <div className="mt-3">
+          <LikeButton liked={liked} busy={busy} count={p.likes} onClick={toggle} />
+        </div>
+      </div>
+
+      {p.desc ? (
+        <div className="mb-4">
+          <p className="text-xs font-medium mb-1" style={{ color: C.muted }}>{t("player_desc")}</p>
+          <p className="text-sm whitespace-pre-wrap" style={{ color: C.text }}>{p.desc}</p>
+        </div>
+      ) : null}
+
+      {discord ? (
+        <div className="mb-4">
+          <p className="text-xs font-medium mb-1" style={{ color: C.muted }}>{t("player_discord")}</p>
+          {discordHref ? (
+            <a href={discordHref} target="_blank" rel="noreferrer" className="text-sm underline break-all" style={{ color: C.green }}>{discord}</a>
+          ) : (
+            <p className="text-sm font-mono break-all" style={{ color: C.text }}>{discord}</p>
+          )}
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap gap-2">
+        <GhostButton icon={Share2} onClick={share}>{t("share")}</GhostButton>
+        {canManage && onEdit && <GhostButton icon={Pencil} onClick={onEdit}>{t("edit")}</GhostButton>}
+        {canManage && onDelete && (
+          <GhostButton icon={Trash2} onClick={() => confirmed(`Remove ${p.name} from the leaderboard? This can't be undone.`, onDelete)}>{t("delete")}</GhostButton>
+        )}
+      </div>
     </Modal>
   );
 }
@@ -1786,7 +1867,7 @@ function LikeButton({ liked, busy, count, onClick }) {
   );
 }
 
-function PlayerEntry({ p, rank, t, session, servers, canManage, onDelete, onEdit, highlighted }) {
+function PlayerEntry({ p, rank, t, session, servers, canManage, onDelete, onEdit, onOpen, highlighted }) {
   const [liked, setLiked] = useState(false);
   const [busy, setBusy] = useState(false);
   const server = servers.find((s) => s.id === p.serverId);
@@ -1796,23 +1877,33 @@ function PlayerEntry({ p, rank, t, session, servers, canManage, onDelete, onEdit
     getMyPlayerLike(p.id, session.uid).then(setLiked).catch(() => {});
   }, [p.id, session.uid]);
 
-  const toggle = () => guardPost(session, async () => {
-    setBusy(true);
-    try {
-      const nowLiked = await togglePlayerLike(p.id, session.uid);
-      setLiked(nowLiked);
-    } catch (err) {
-      console.error(err);
-      alert("Couldn't save your like — " + (err?.message || "please try again."));
-    } finally {
-      setBusy(false);
-    }
-  });
+  const toggle = (e) => {
+    e?.stopPropagation?.();
+    guardPost(session, async () => {
+      setBusy(true);
+      try {
+        const nowLiked = await togglePlayerLike(p.id, session.uid);
+        setLiked(nowLiked);
+      } catch (err) {
+        console.error(err);
+        alert("Couldn't save your like — " + (err?.message || "please try again."));
+      } finally {
+        setBusy(false);
+      }
+    });
+  };
 
+  const stop = (e) => e.stopPropagation();
   const podium = rank <= 3;
   return (
     <div
-      className={podium ? "rounded-xl border p-3 flex flex-col items-center text-center transition-shadow" : "rounded-xl border p-3 flex items-center gap-3 transition-shadow"}
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen?.(p, rank)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen?.(p, rank); } }}
+      className={podium
+        ? "rounded-xl border p-3 flex flex-col items-center text-center transition-shadow cursor-pointer active:opacity-90"
+        : "rounded-xl border p-3 flex items-center gap-3 transition-shadow cursor-pointer active:opacity-90"}
       style={{
         borderColor: highlighted ? C.green : (podium ? RANK_COLOR[rank] : C.border),
         background: C.panel,
@@ -1829,7 +1920,7 @@ function PlayerEntry({ p, rank, t, session, servers, canManage, onDelete, onEdit
           <p className="text-[10px] mb-1 truncate max-w-full" style={{ color: C.muted }}>{server ? server.name : p.platform}</p>
           {p.desc && <p className="text-[11px] mb-2 line-clamp-2">{p.desc}</p>}
           <LikeButton liked={liked} busy={busy} count={p.likes} onClick={toggle} />
-          <div className="flex items-center gap-2 mt-2">
+          <div className="flex items-center gap-2 mt-2" onClick={stop}>
             <button onClick={() => { copyShareLink("players", p.id); alert(t("link_copied")); }}><Share2 size={13} color={C.muted} /></button>
             {canManage && onEdit && <button onClick={onEdit}><Pencil size={13} color={C.muted} /></button>}
             {canManage && <button onClick={() => confirmed(`Remove ${p.name} from the leaderboard? This can't be undone.`, () => onDelete(p))}><Trash2 size={13} color={C.muted} /></button>}
@@ -1845,10 +1936,12 @@ function PlayerEntry({ p, rank, t, session, servers, canManage, onDelete, onEdit
             <p className="font-semibold text-sm truncate flex items-center gap-1.5">{p.name} <ListingBadges t={t} createdAt={p.createdAt} rating={5} votes={p.likes} trendMinVotes={10} trendMinRating={0} /></p>
             <p className="text-[11px] truncate" style={{ color: C.muted }}>{server ? server.name : p.platform}</p>
           </div>
-          <LikeButton liked={liked} busy={busy} count={p.likes} onClick={toggle} />
-          <button onClick={() => { copyShareLink("players", p.id); alert(t("link_copied")); }}><Share2 size={14} color={C.muted} /></button>
-          {canManage && onEdit && <button onClick={onEdit}><Pencil size={14} color={C.muted} /></button>}
-          {canManage && <button onClick={() => confirmed(`Remove ${p.name} from the leaderboard? This can't be undone.`, () => onDelete(p))}><Trash2 size={14} color={C.muted} /></button>}
+          <div onClick={stop} className="flex items-center gap-2 shrink-0">
+            <LikeButton liked={liked} busy={busy} count={p.likes} onClick={toggle} />
+            <button onClick={() => { copyShareLink("players", p.id); alert(t("link_copied")); }}><Share2 size={14} color={C.muted} /></button>
+            {canManage && onEdit && <button onClick={onEdit}><Pencil size={14} color={C.muted} /></button>}
+            {canManage && <button onClick={() => confirmed(`Remove ${p.name} from the leaderboard? This can't be undone.`, () => onDelete(p))}><Trash2 size={14} color={C.muted} /></button>}
+          </div>
         </>
       )}
     </div>
@@ -1856,8 +1949,25 @@ function PlayerEntry({ p, rank, t, session, servers, canManage, onDelete, onEdit
 }
 
 function PlayersSection({ t, session, servers, coll, ads, openId, onConsumeOpenId }) {
-  const [q, setQ] = useState(""); const [showForm, setShowForm] = useState(false); const [editing, setEditing] = useState(null);
-  const flashId = useFlashHighlight(openId, coll.items.length > 0, onConsumeOpenId);
+  const [q, setQ] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [active, setActive] = useState(null); // { player, rank }
+  const flashId = useFlashHighlight(openId && !active ? openId : null, coll.items.length > 0, onConsumeOpenId);
+
+  // Shared /players/:id links open the detail modal once data is loaded.
+  useEffect(() => {
+    if (!openId || !coll.items.length) return;
+    const match = coll.items.find((p) => p.id === openId);
+    if (match) {
+      const ranked = [...coll.items].sort((a, b) => (b.likes || 0) - (a.likes || 0));
+      const rank = ranked.findIndex((x) => x.id === match.id) + 1;
+      setActive({ player: match, rank });
+    } else {
+      alert("That shared player link doesn't match anything here anymore — it may have been removed.");
+    }
+    onConsumeOpenId();
+  }, [openId, coll.items]);
 
   const ranked = useMemo(() => coll.items
     .filter((p) => (q ? p.name.toLowerCase().includes(q.toLowerCase()) : true))
@@ -1866,11 +1976,22 @@ function PlayersSection({ t, session, servers, coll, ads, openId, onConsumeOpenI
   const rest = ranked.slice(3);
 
   const save = async (f) => {
+    const payload = {
+      name: f.name,
+      platform: f.platform,
+      desc: f.desc || "",
+      discord: (f.discord || "").trim(),
+      serverId: f.serverId || "",
+      photo: f.photo || null,
+    };
     if (editing) {
-      await deleteReplacedImages(editing, f);
-      await coll.update(editing.id, { name: f.name, platform: f.platform, desc: f.desc, serverId: f.serverId, photo: f.photo });
+      await deleteReplacedImages(editing, payload);
+      await coll.update(editing.id, payload);
+      if (active?.player?.id === editing.id) {
+        setActive({ player: { ...active.player, ...payload }, rank: active.rank });
+      }
     } else {
-      await coll.add({ ...f, likes: 0, createdAt: Date.now(), ownerId: session.uid });
+      await coll.add({ ...payload, likes: 0, createdAt: Date.now(), ownerId: session.uid });
       await markPosted(session.uid);
     }
     setShowForm(false); setEditing(null);
@@ -1879,7 +2000,11 @@ function PlayersSection({ t, session, servers, coll, ads, openId, onConsumeOpenI
     const item = typeof itemOrId === "object" ? itemOrId : coll.items.find((x) => x.id === itemOrId);
     await deleteImagesFromRecord(item);
     await coll.remove(typeof itemOrId === "object" ? itemOrId.id : itemOrId);
+    setActive(null);
   };
+
+  const openPlayer = (p, rank) => setActive({ player: p, rank });
+  const canManageOf = (p) => session.loggedIn && (session.uid === p.ownerId || session.role === "admin" || session.role === "owner");
 
   return (
     <div>
@@ -1898,10 +2023,12 @@ function PlayersSection({ t, session, servers, coll, ads, openId, onConsumeOpenI
           {podiumOrder.map((p, i) => {
             const rank = i === 1 ? 1 : i === 0 ? 2 : 3;
             if (!p) return <div key={rank} />;
-            const canManage = session.loggedIn && (session.uid === p.ownerId || session.role === "admin" || session.role === "owner");
             return (
               <div key={p.id} className={i === 1 ? "" : "mt-4"}>
-                <PlayerEntry p={p} rank={rank} t={t} session={session} servers={servers} canManage={canManage} onDelete={remove} onEdit={() => { setEditing(p); setShowForm(true); }} highlighted={p.id === flashId} />
+                <PlayerEntry p={p} rank={rank} t={t} session={session} servers={servers}
+                  canManage={canManageOf(p)} onDelete={remove}
+                  onEdit={() => { setEditing(p); setShowForm(true); }}
+                  onOpen={openPlayer} highlighted={p.id === flashId} />
               </div>
             );
           })}
@@ -1912,13 +2039,29 @@ function PlayersSection({ t, session, servers, coll, ads, openId, onConsumeOpenI
         {interleaveAds(rest, adsForCategory(ads.items, "players"), 4).map((row, i) => {
           if (row.kind === "ad") return <AdSlot key={`ad-${row.data.id}-${i}`} ad={row.data} t={t} category="players" viewerUid={session.uid} />;
           const p = row.data;
-          // rank is approximate when ads are interleaved — use index among items only
           const rank = rest.indexOf(p) + 4;
-          const canManage = session.loggedIn && (session.uid === p.ownerId || session.role === "admin" || session.role === "owner");
-          return <PlayerEntry key={p.id} p={p} rank={rank} t={t} session={session} servers={servers} canManage={canManage} onDelete={remove} onEdit={() => { setEditing(p); setShowForm(true); }} highlighted={p.id === flashId} />;
+          return (
+            <PlayerEntry key={p.id} p={p} rank={rank} t={t} session={session} servers={servers}
+              canManage={canManageOf(p)} onDelete={remove}
+              onEdit={() => { setEditing(p); setShowForm(true); }}
+              onOpen={openPlayer} highlighted={p.id === flashId} />
+          );
         })}
       </div>
       {showForm && <PlayerFormModal t={t} servers={servers} initial={editing} onClose={() => { setShowForm(false); setEditing(null); }} onSave={save} />}
+      {active && (
+        <PlayerDetailModal
+          p={active.player}
+          rank={active.rank}
+          t={t}
+          session={session}
+          servers={servers}
+          canManage={canManageOf(active.player)}
+          onClose={() => setActive(null)}
+          onEdit={() => { setEditing(active.player); setShowForm(true); setActive(null); }}
+          onDelete={() => remove(active.player)}
+        />
+      )}
     </div>
   );
 }
